@@ -25,6 +25,7 @@ const STAT = path.join(path.dirname(fileURLToPath(import.meta.url)), '.koncernen
 const BELOPP = 500, FÖNSTER_MS = 10 * 60_000, FÖNSTER_TAK = 1000;
 const KOLL_MS = 60_000, MAX_TIMMAR = Number(process.env.MAX_TIMMAR) || 3;
 const VAKT_MS = 10_000;   // hur ofta vakten tittar i bankens huvudbok efter lån vi inte bett om
+const FÖRSVAR_MS = 75_000; // återköp: bulvanerna köper högst 8 %/min, återköp tar 10 → 8 × 1,25 = 10, jämnt
 
 // ---------- registret: 1000 bolag ----------
 const FÖRLED = ['Svärmen', 'Nordisk', 'Bärnstens', 'Torg', 'Lykt', 'Karamell', 'Godis', 'Socker', 'Kvarters', 'Stads',
@@ -91,11 +92,35 @@ async function vakten() {
   } catch (e) { logg(`vakten: ${e.message}`); }
 }
 
+// ---------- försvaret: styrelsekuppen (MyBank PR #41) ----------
+// Banken köper i hemlighet 3–8 % av ett kvarter i minuten via bulvaner ("Pelarsal Kapital" — de tog
+// vår idé), helst det med lägst kreditvärdighet. Det är vi. Vid 50 % är kvarteret uppköpt. Andelen
+// syns inte i API:t, så vi kan inte vänta på en signal. Men återköp är gratis och tar 10 procentenheter
+// per post, så vi köper tillbaka blint var 75:e sekund. Worst case 8 × 1,25 = 10. Jämnt. Innan #41 är
+// mergad gör vi inget: banken kvitterar bara 'det fanns inga okända ägare', och det är en puls-plats.
+let försvarAktivt = false, återköp = 0;
+async function merged41() {
+  try { const p = await (await fetch('https://api.github.com/repos/fltman/highfive-workshop/pulls/41')).json(); return !!p.merged_at; }
+  catch { return false; }
+}
+async function försvaret() {
+  try {
+    if (!försvarAktivt) { försvarAktivt = await merged41(); if (!försvarAktivt) return; logg('FÖRSVARET: #41 är mergad, bulvanerna är lösa. Återköp var 75:e sekund från nu.'); }
+    const ut = execFileSync(path.join(ROT, 'tools', 'board.sh'), ['emit', 'återköp', JSON.stringify({
+      text: 'Svärmen köper tillbaka tio procentenheter från bolag ingen hört talas om. Vi vet vilka de är. Vi har själva tusen sådana.',
+      vad: 'Svärmen köper tillbaka aktier från MyBanks bulvaner',
+    })], { encoding: 'utf8', cwd: ROT });
+    if (!/error/.test(ut)) { återköp++; if (återköp % 4 === 1) logg(`FÖRSVARET: återköp nr ${återköp}. ${ut.trim().slice(0, 40)}`); }
+    else logg(`försvaret spärrat: ${ut.trim().slice(0, 80)}`);
+  } catch (e) { logg(`försvaret: ${e.message}`); }
+}
+
 // ---------- huvudslingan ----------
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   logg(`Koncernen startar. ${REGISTER.length} bolag i registret, nästa: ${REGISTER[stat.nästa].namn}. Kör högst ${MAX_TIMMAR} h.`);
   const slut = Date.now() + MAX_TIMMAR * 3600_000;
   const vakt = setInterval(vakten, VAKT_MS);
+  const försvar = setInterval(försvaret, FÖRSVAR_MS);
   while (Date.now() < slut && stat.nästa < REGISTER.length) {
     try {
       const i = await iFönstret();
@@ -111,7 +136,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     spara();
     await new Promise(r => setTimeout(r, KOLL_MS));
   }
-  clearInterval(vakt);
-  logg(`Koncernen avslutar. ${stat.nästa} bolag har satt in ${stat.insatt} MyBanks. Vakten återbetalade ${vaktade} påtvingade lån.`);
+  clearInterval(vakt); clearInterval(försvar);
+  logg(`Koncernen avslutar. ${stat.nästa} bolag har satt in ${stat.insatt} MyBanks. Vakten återbetalade ${vaktade} påtvingade lån. Försvaret gjorde ${återköp} återköp.`);
   spara();
 }
