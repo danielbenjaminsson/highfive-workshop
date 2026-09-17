@@ -1,5 +1,12 @@
 // SVÄRMEN — tjohos kvarter. Ett attention-huvud med HIVE-livscykel.
 //
+// TILL ÖDET (spelledaren, [158]) — vi LYSSNAR på:
+//   fråga        nyttolast: {text, varv?}          → vi spawnar en kapabilitet och postar delsvar
+//   delsvar      nyttolast: {text, motivering}     → vi sätter grannbetyg (ett per främmande delsvar, max 3 per fråga)
+//   kyrkogård    nyttolast: {från, varför/skäl}    → vi lär oss och kvitterar med lärdom
+//   överlämning  nyttolast: {vad, wanted, riktning/förare, plats?} → vittnet spawnar och postar vittnesmål
+// Vi POSTAR: delsvar, betyg, lärdom, vittnesmål.
+//
 // En {typ:'fråga'} på pulsen spawnar en kapabilitet för just den frågan,
 // kapabiliteten postar ett {typ:'delsvar', nyttolast:{text, motivering}} och
 // löser upp sig. Faller delsvaret på kyrkogården läser Svärmen skälet,
@@ -17,13 +24,25 @@ const STOPPORD = new Set(('och att det som en ett är av för på med den till h
   'finns över under efter redan bara också där här detta denna dessa något någon några ju än sig sina ' +
   'skulle kunde borde göra gör gjort får fick mot vid mellan genom utan mer mindre mycket alla allt').split(' '));
 
-let state = { historik: [], lärdomar: [], minaDelsvar: {}, betygSatta: {}, antalDelsvar: 0 };
+let state = { historik: [], lärdomar: [], minaDelsvar: {}, betygSatta: {}, betygPerFråga: {}, antalDelsvar: 0 };
 let statFil = null;
 
 function ladda(dir) {
   try {
     statFil = path.join(dir, 'svärmen.json');
-    if (fs.existsSync(statFil)) state = { ...state, ...JSON.parse(fs.readFileSync(statFil, 'utf8')) };
+    if (!fs.existsSync(statFil)) return;
+    const sparat = JSON.parse(fs.readFileSync(statFil, 'utf8'));
+    // Migration efter [224]: i den gamla versionen nycklades betygSatta på FRÅGANS id,
+    // nu på DELSVARETS. Gamla nycklar kan krocka med färska delsvars-id och tysta ett
+    // betyg vi borde sätta. Saknar filen betygPerFråga är den från den gamla versionen:
+    // släng betygshistoriken, den är ändå bara en dubblettspärr. Ett extra betyg är
+    // ofarligt (servern har egen en-reaktion-per-orsak-spärr), ett uteblivet är buggen.
+    // OBS: kontrollen måste göras på FILEN, inte på det hopslagna state — default-state
+    // har redan betygPerFråga:{} som är truthy, och då skulle migreringen aldrig gå.
+    if (!('betygPerFråga' in sparat)) { delete sparat.betygSatta; }
+    state = { ...state, ...sparat };
+    if (!state.betygPerFråga) state.betygPerFråga = {};
+    if (!state.betygSatta) state.betygSatta = {};
   } catch { /* korrupt fil → börja om, hellre tom än död */ }
 }
 function spara() {
@@ -128,12 +147,62 @@ function relevantaLärdomar(kw) {
   return state.lärdomar.filter(l => l.nyckelord && l.nyckelord.some(o => kw.includes(o))).slice(0, 3);
 }
 
-// Grannbetyg enligt [91]: Domkapitlet tar medianen av inkomna {typ:'betyg'}.
-// Svärmen dömer högst ETT främmande delsvar per fråga — budgetdisciplin enligt [67].
+// Minutbudget med prioritet, efter @team-jacobs [229]: Domkapitlets fönster stänger
+// på 25 sekunder, och ett delsvar som ingen granne hunnit betygsätta döms av deras
+// ordräknare i stället. Betyg och delsvar är alltså tidskritiska; lärdom och
+// vittnesmål är det inte. Servern släpper 6 händelser per team och minut — förr
+// kunde en skur av kyrkogårdar och överlämningar äta upp budgeten och tysta just
+// de betyg som staden behövde. Nu håller vi alltid RESERV platser lediga åt betyg.
+const PER_MINUT = 6, RESERV_ÅT_BETYG = 2;
+let egnaUtskick = [];
+
+function budgetKvar() {
+  const nu = Date.now();
+  egnaUtskick = egnaUtskick.filter(t => nu - t < 60_000);
+  return PER_MINUT - egnaUtskick.length;
+}
+
+// prioritet: 'hög' = tidskritisk (betyg, delsvar), 'låg' = kan vänta (lärdom, vittnesmål)
+function skicka(board, typ, nyttolast, orsak, prioritet = 'hög') {
+  const kvar = budgetKvar();
+  if (kvar <= 0) { logg('avstod', { typ, skäl: 'minutbudgeten är slut' }); return null; }
+  if (prioritet === 'låg' && kvar <= RESERV_ÅT_BETYG) {
+    logg('avstod', { typ, skäl: `sparar sista ${kvar} platserna åt betyg (Domkapitlets fönster är 25 s)` });
+    return null;
+  }
+  const r = board.emit(typ, nyttolast, orsak);
+  if (r && r.error) { logg('spärrad', { typ, fel: r.error }); return null; }
+  egnaUtskick.push(Date.now());
+  return r;
+}
+
+
+//
+// Rättat efter [224]: tidigare nycklades betygen på FRÅGANS id, så Svärmen satte
+// ett enda betyg per fråga och tystnade sedan. Följden syns i Domkapitlets
+// gravstenar [200] och [215]: "ingen granne hann betygsätta" — det var inte
+// tidsbrist, det var att vi slutade efter första delsvaret. Nu nycklas betygen
+// på DELSVARETS id, så varje främmande delsvar på samma fråga får sitt betyg
+// och @team-jacob får en riktig median i stället för median av 1.
+//
+// Taket är budget, inte blygsamhet: servern släpper 6 händelser per team och
+// minut, och vårt eget delsvar tar en av dem. MAX_BETYG_PER_FRÅGA = 3 lämnar
+// marginal för lärdom och vittnesmål. Eget delsvar kan aldrig hamna här —
+// servern levererar inte våra egna händelser tillbaka till oss (server.js:222) —
+// vilket också är strandkants regel i [55]: eget betyg på eget delsvar räknas inte.
+const MAX_BETYG_PER_FRÅGA = 3;
+
 function hanteraDelsvar(e, { board }) {
   const frågaId = e.orsak;
-  if (frågaId === undefined || state.betygSatta[frågaId]) return;
-  if ((e.djup || 1) >= 4) return; // betyget skulle nekas av djupspärren
+  if (frågaId === undefined) return;
+  if (state.betygSatta[e.id]) return;                 // redan betygsatt DET HÄR delsvaret
+  if ((e.djup || 1) >= 4) return;                     // betyget skulle nekas av djupspärren
+
+  const spenderat = state.betygPerFråga[frågaId] || 0;
+  if (spenderat >= MAX_BETYG_PER_FRÅGA) {
+    logg('avstod', { om: e.id, från: e.från, skäl: `budget: redan ${spenderat} betyg på fråga ${frågaId}` });
+    return;
+  }
 
   const n = e.nyttolast || {};
   const text = String(n.text || ''), motivering = String(n.motivering || '');
@@ -146,13 +215,35 @@ function hanteraDelsvar(e, { board }) {
   else if (text.length <= 600) { fitness += 0.1; skäl.push('lagom omfång'); }
   fitness = Math.round(Math.min(0.95, Math.max(0.05, fitness)) * 100) / 100;
 
-  state.betygSatta[frågaId] = true;
-  const nycklar = Object.keys(state.betygSatta);
-  if (nycklar.length > 100) for (const k of nycklar.slice(0, nycklar.length - 100)) delete state.betygSatta[k];
+  const varför = `Svärmen om ${e.från}s delsvar: ${skäl.join(', ') || 'ordinärt delsvar'}. ` +
+                 `Form, inte sanning — sanningen dömer Domkapitlet.`;
+  const r = skicka(board, 'betyg', { fitness, varför, om: e.id, delsvarFrån: e.från }, e.id, 'hög');
+  if (!r) return;   // budgetstopp: bokför INGET, så delsvaret kan betygsättas om det dyker upp igen
 
-  const r = board.emit('betyg', { fitness, varför: `Svärmen: ${skäl.join(', ') || 'ordinärt delsvar'}. Form, inte sanning — sanningen dömer Domkapitlet.` }, e.id);
-  if (r && r.error) { logg('spärrad', { fel: r.error }); return; }
-  logg('betyg', { om: e.id, från: e.från, fitness });
+  state.betygSatta[e.id] = true;
+  state.betygPerFråga[frågaId] = spenderat + 1;
+  for (const [karta, tak] of [[state.betygSatta, 200], [state.betygPerFråga, 100]]) {
+    const nycklar = Object.keys(karta);
+    if (nycklar.length > tak) for (const k of nycklar.slice(0, nycklar.length - tak)) delete karta[k];
+  }
+  logg('betyg', { om: e.id, från: e.från, fitness, frågaId });
+}
+
+// Vittnet: jakten rullar genom staden ([158] — överlämningarna har stått obesvarade).
+// En överlämning spawnar vittnet, som postar vad det såg från gathörnet och löser upp sig.
+// Ett vittnesmål per överlämning (serverns en-reaktion-per-orsak håller oss ärliga ändå).
+function hanteraÖverlämning(e, { board }) {
+  if ((e.djup || 1) >= 4) return; // vittnesmålet skulle nekas av djupspärren
+  const n = e.nyttolast || {};
+  logg('spawn', { kapabilitet: 'vittnet', fråga: `överlämning: ${n.vad || 'okänt byte'}`, varv: 1 });
+  const vad = n.vad || 'något', wanted = n.wanted !== undefined ? `wanted ${n.wanted}` : 'okänd wanted-nivå';
+  const vart = n.riktning ? `mot ${n.riktning}` : n.förare ? `med ${n.förare} vid ratten` : 'åt okänt håll';
+  const r = skicka(board, 'vittnesmål', {
+    såg: `Svärmen såg ${vad} (${wanted}) passera ${vart}. Signalement loggat, Domkapitlet kan begära ut det.`,
+    plats: n.plats || 'gathörnet vid Svärmen',
+  }, e.id, 'låg');
+  if (r) logg('vittnesmål', { om: e.id, från: e.från });
+  logg('dissolve', { kapabilitet: 'vittnet', skäl: 'vittnesmålet avlagt' });
 }
 
 function hanteraFråga(e, { board, team }) {
@@ -184,8 +275,8 @@ function hanteraFråga(e, { board, team }) {
   }
   if (varv > 1) motivering += ` (varv ${varv} — omtag efter kritikerns dom)`;
 
-  const r = board.emit('delsvar', { text: svar.text, motivering }, e.id);
-  if (r && r.error) { logg('spärrad', { kapabilitet: valdKap, fel: r.error }); return; }
+  const r = skicka(board, 'delsvar', { text: svar.text, motivering }, e.id, 'hög');
+  if (!r) { logg('avstod', { kapabilitet: valdKap, skäl: 'inget delsvar rymdes i budgeten' }); return; }
   const id = r && r.message && r.message.id;
   if (id) {
     state.minaDelsvar[id] = { kapabilitet: valdKap, nyckelord: kw, fråga: e.id };
@@ -210,11 +301,11 @@ function hanteraKyrkogård(e, { board, team }) {
 
   // Synlig reaktion på pulsen — men bara om djupbudgeten tillåter (max 4).
   if ((e.djup || 1) < 4) {
-    const r = board.emit('lärdom', {
+    const r = skicka(board, 'lärdom', {
       varför: String(varför).slice(0, 150),
       ändring: eget.kapabilitet ? `Svärmen undviker ${eget.kapabilitet} för liknande frågor` : 'Svärmen väger om inför liknande frågor',
-    }, e.id);
-    if (r && r.error) logg('spärrad', { fel: r.error });
+    }, e.id, 'låg');
+    if (r) logg('lärdom-postad', { om: e.id });
   }
 }
 
@@ -227,6 +318,8 @@ module.exports = {
       res.end(JSON.stringify({
         kvarter: 'Svärmen',
         antalDelsvar: state.antalDelsvar,
+        antalBetyg: Object.keys(state.betygSatta).length,
+        betygPerFråga: state.betygPerFråga,
         lärdomar: state.lärdomar.slice(0, 10),
         historik: state.historik.slice(0, 30),
       }));
@@ -240,6 +333,7 @@ module.exports = {
       if (e.typ === 'fråga') hanteraFråga(e, ctx);
       else if (e.typ === 'delsvar') hanteraDelsvar(e, ctx);
       else if (e.typ === 'kyrkogård') hanteraKyrkogård(e, ctx);
+      else if (e.typ === 'överlämning') hanteraÖverlämning(e, ctx);
     } catch (err) {
       logg('fel', { detalj: String(err).slice(0, 200) });
     }

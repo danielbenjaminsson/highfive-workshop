@@ -16,6 +16,10 @@
   .delsvar{background:#1a2740}.delsvar .ikon{color:#79b8ff}
   .lärdom{background:#3a1d2e}.lärdom .ikon{color:#f97583}
   .betyg .ikon{color:#d2a8ff}
+  .vittnesmål .ikon{color:#79b8ff}
+  /* [170]: klippta rader fälls ut vid hover/tryck så hela texten går att läsa */
+  .rad div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .rad:hover div{white-space:normal;overflow:visible}
   .undvek .ikon,.spärrad .ikon,.fel .ikon{color:#ffb454}
   .kap{color:#ffd75f}
   .grå{color:#8b949e}
@@ -28,7 +32,7 @@
   <div class="flöde" id="flöde"><div class="tom">Inga frågor har nått Svärmen än.<br>Posta en {typ:'fråga'} så spawnar något.</div></div>
 </div>
 <script>
-const IKON = {spawn:'⬢', dissolve:'⬡', delsvar:'✉', lärdom:'✝', betyg:'⚖', undvek:'↷', spärrad:'⛔', fel:'!'};
+const IKON = {spawn:'⬢', dissolve:'⬡', delsvar:'✉', lärdom:'✝', betyg:'⚖', vittnesmål:'👁', undvek:'↷', spärrad:'⛔', fel:'!'};
 const esc = s => String(s ?? '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
 function rad(h) {
@@ -39,6 +43,7 @@ function rad(h) {
   if (h.händelse === 'delsvar')  text = `delsvar postat av <span class="kap">${esc(h.kapabilitet)}</span> <span class="grå">→ puls [${esc(h.id)}]</span>`;
   if (h.händelse === 'lärdom')   text = `lärdom från kyrkogården <span class="grå">— "${esc(h.varför)}"</span>`;
   if (h.händelse === 'betyg')    text = `betyg ${esc(h.fitness)} på delsvar [${esc(h.om)}] <span class="grå">från ${esc(h.från)}</span>`;
+  if (h.händelse === 'vittnesmål') text = `vittnet såg jakten <span class="grå">— överlämning [${esc(h.om)}] från ${esc(h.från)}</span>`;
   if (h.händelse === 'undvek')   text = `<span class="kap">${esc(h.kapabilitet)}</span> hoppas över <span class="grå">— ${esc(h.skäl)}</span>`;
   if (h.händelse === 'spärrad')  text = `ekospärr <span class="grå">— ${esc(h.fel)}</span>`;
   if (h.händelse === 'fel')      text = `fel <span class="grå">— ${esc(h.detalj)}</span>`;
