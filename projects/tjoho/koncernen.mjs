@@ -115,7 +115,21 @@ async function försvaret() {
   } catch (e) { logg(`försvaret: ${e.message}`); }
 }
 
-// ---------- huvudslingan ----------
+// ---------- företrädet: skattemedel går före koncernbidrag ----------
+// Sedan SE-Bank öppnade delar vi lucka med Skatteverket. MyBank tar 1000 per tio minuter och inte
+// en krona mer, och står det indriven trängselskatt i SE-Banks kassa ska den gå först. Bolagen i
+// Nevis får vänta. Det är inte generositet: koncernbidrag från ett brevlådebolag på Cayman tål att
+// stå i kö, skattemedel som staden redan betalat gör det inte.
+async function skattenFörst() {
+  try {
+    const r = await fetch(`${URL}/t/tjoho/sebank`);
+    if (!r.ok) return 0;
+    const b = await r.json();
+    return Number(b.kassa) || 0;
+  } catch { return 0; }   // når vi inte SE-Bank antar vi tom kassa och kör på
+}
+
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   logg(`Koncernen startar. ${REGISTER.length} bolag i registret, nästa: ${REGISTER[stat.nästa].namn}. Kör högst ${MAX_TIMMAR} h.`);
   const slut = Date.now() + MAX_TIMMAR * 3600_000;
@@ -123,6 +137,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const försvar = setInterval(försvaret, FÖRSVAR_MS);
   while (Date.now() < slut && stat.nästa < REGISTER.length) {
     try {
+      const kassa = await skattenFörst();
+      if (kassa >= BELOPP) {
+        logg(`viker undan: SE-Bank har ${Math.round(kassa)} SEK indriven skatt i kön. Skattemedel före koncernbidrag.`);
+        stat.undanvikta = (stat.undanvikta || 0) + 1;
+        spara();
+        await new Promise(r => setTimeout(r, KOLL_MS));
+        continue;
+      }
       const i = await iFönstret();
       if (i + BELOPP <= FÖNSTER_TAK) {
         const b = REGISTER[stat.nästa];
@@ -137,6 +159,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     await new Promise(r => setTimeout(r, KOLL_MS));
   }
   clearInterval(vakt); clearInterval(försvar);
-  logg(`Koncernen avslutar. ${stat.nästa} bolag har satt in ${stat.insatt} MyBanks. Vakten återbetalade ${vaktade} påtvingade lån. Försvaret gjorde ${återköp} återköp.`);
+  logg(`Koncernen avslutar. ${stat.nästa} bolag har satt in ${stat.insatt} MyBanks. Vakten återbetalade ${vaktade} påtvingade lån. Försvaret gjorde ${återköp} återköp. Bolagen vek undan för skattemedel ${stat.undanvikta || 0} gånger.`);
   spara();
 }

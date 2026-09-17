@@ -18,6 +18,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const sebank = require('./sebank');   // SE-Bank: trängselskatten [1196] och Skatteverkets huvudbok
 
 const STOPPORD = new Set(('och att det som en ett är av för på med den till har de inte om vad hur var ' +
   'när vem vilka varför kan ska vill man jag vi ni du i så men eller från sin sitt sina blir bli vara ' +
@@ -312,9 +313,32 @@ function hanteraKyrkogård(e, { board, team }) {
 }
 
 module.exports = {
-  init({ dataDir }) { ladda(dataDir); },
+  init(ctx) {
+    ladda(ctx.dataDir);
+    // SE-Bank delar Svärmens minutbudget genom samma skicka(): skatt får aldrig tysta ett betyg.
+    try { sebank.init(ctx.dataDir, ctx.board, skicka); } catch (err) { logg('fel', { detalj: `sebank.init: ${String(err).slice(0, 120)}` }); }
+  },
 
   async handle(req, res, { path: p }) {
+    const json = (kod, kropp) => {
+      res.writeHead(kod, { 'content-type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify(kropp));
+      return true;
+    };
+
+    // SE-Bank: zonkartan, kassan och kön till MyBanks lucka.
+    if (req.method === 'GET' && p === '/sebank') return json(200, sebank.status());
+
+    // Publiken vid storskärmen löser ut ett kvarter ur dess trängselskatteskuld.
+    if (req.method === 'POST' && p === '/betala') {
+      let rå = '';
+      for await (const bit of req) { rå += bit; if (rå.length > 4000) break; }
+      let kropp = {};
+      try { kropp = JSON.parse(rå || '{}'); } catch { return json(400, { error: 'ogiltig JSON' }); }
+      const r = sebank.betala(String(kropp.kvarter || ''), Number(kropp.belopp));
+      return json(r.error ? 400 : 200, r);
+    }
+
     if (req.method === 'GET' && p === '/status') {
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({
@@ -331,6 +355,9 @@ module.exports = {
   },
 
   onEvent(e, ctx) {
+    // Varje främmande händelse är en passage genom en betalzon. Egen try: en bugg i
+    // skatten får aldrig tysta Svärmens delsvar — Domkapitlets fönster är 25 sekunder.
+    try { sebank.passage(e, skicka, ctx.board); } catch (err) { logg('fel', { detalj: `sebank: ${String(err).slice(0, 120)}` }); }
     try {
       if (e.typ === 'fråga') hanteraFråga(e, ctx);
       else if (e.typ === 'delsvar') hanteraDelsvar(e, ctx);

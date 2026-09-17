@@ -25,11 +25,49 @@
   .grå{color:#8b949e}
   .t{color:#484f58;flex:none;font-size:11px}
   .tom{color:#484f58;text-align:center;margin-top:30px}
+  /* ---- SE-Bank: trängselskatten [1196] ---- */
+  .flikar{display:flex;gap:6px;flex:none}
+  .flik{cursor:pointer;padding:2px 9px;border-radius:4px;background:#161b22;color:#8b949e;font-size:11px;letter-spacing:.08em;border:1px solid #21262d}
+  .flik.på{background:#1f2937;color:#ffd75f;border-color:#ffd75f66}
+  #sebank{display:none;flex:1;flex-direction:column;gap:8px;min-height:0}
+  .kolumner{display:flex;gap:8px;flex:none}
+  .kol{flex:1;background:#12161c;border:1px solid #21262d;border-radius:6px;padding:6px 8px}
+  .kol .rubrik{color:#8b949e;font-size:10px;letter-spacing:.1em}
+  .kol .tal{font-size:19px;color:#ffd75f;margin-top:2px}
+  .kol.kassa .tal{color:#5fd7a7}
+  .kol.insatt .tal{color:#79b8ff}
+  .kol .under{color:#484f58;font-size:10px}
+  .lucka{flex:none;background:#1a1410;border:1px solid #6b4a1f;border-radius:6px;padding:5px 8px;color:#ffb454;font-size:11px}
+  .lucka b{color:#ffd75f}
+  .karta{flex:1;overflow-y:auto;min-height:0;display:flex;flex-direction:column;gap:2px}
+  .z{display:flex;gap:6px;align-items:center;padding:2px 6px;border-radius:4px;background:#12161c}
+  .z .namn{width:6.5em;flex:none;color:#e6e8eb;overflow:hidden;text-overflow:ellipsis}
+  .z .zon{width:5.5em;flex:none;font-size:10px}
+  .z .stapel{flex:1;height:7px;background:#1c2128;border-radius:3px;overflow:hidden;min-width:20px}
+  .z .stapel i{display:block;height:100%;background:linear-gradient(90deg,#5fd7a7,#ffd75f)}
+  .z .skuld{width:4.5em;text-align:right;flex:none;color:#ffd75f}
+  .z .tak{color:#f97583;font-size:10px;width:1em;flex:none}
+  .z button{flex:none;background:#21262d;color:#8b949e;border:1px solid #30363d;border-radius:3px;font:inherit;font-size:10px;cursor:pointer;padding:0 5px}
+  .z button:hover{background:#2d333b;color:#5fd7a7}
+  .Innerstaden{color:#f97583}.Ringen{color:#ffb454}.Ytterzonen{color:#ffd75f}.Landsvägen{color:#5fd7a7}
 </style></head>
 <body><div class="wrap">
   <h1>⬢ SVÄRMEN <small>attention-huvud · kapabiliteter spawnar per fråga och löser upp sig</small></h1>
+  <div class="flikar">
+    <div class="flik på" id="flikSvärmen" onclick="visa('svärmen')">SVÄRMEN</div>
+    <div class="flik" id="flikSebank" onclick="visa('sebank')">🏦 SE-BANK</div>
+  </div>
   <div class="stat" id="stat">väntar på pulsen …</div>
   <div class="flöde" id="flöde"><div class="tom">Inga frågor har nått Svärmen än.<br>Posta en {typ:'fråga'} så spawnar något.</div></div>
+  <div id="sebank">
+    <div class="kolumner">
+      <div class="kol"><div class="rubrik">FORDRINGAR</div><div class="tal" id="fordringar">–</div><div class="under">taxerat, obetalt</div></div>
+      <div class="kol kassa"><div class="rubrik">KASSAN</div><div class="tal" id="kassa">–</div><div class="under">indrivet, i kö</div></div>
+      <div class="kol insatt"><div class="rubrik">I MYBANK</div><div class="tal" id="insatt">–</div><div class="under">genom luckan</div></div>
+    </div>
+    <div class="lucka" id="lucka">…</div>
+    <div class="karta" id="karta"></div>
+  </div>
 </div>
 <script>
 const IKON = {spawn:'⬢', dissolve:'⬡', delsvar:'✉', lärdom:'✝', betyg:'⚖', vittnesmål:'👁', undvek:'↷', spärrad:'⛔', fel:'!'};
@@ -62,4 +100,57 @@ async function uppdatera() {
   } catch {}
 }
 uppdatera(); setInterval(uppdatera, 4000);
+
+// ---- SE-Bank: zonkartan, kassan och kön till MyBanks lucka ----
+let flik = 'svärmen';
+function visa(v) {
+  flik = v;
+  const bank = v === 'sebank';
+  document.getElementById('sebank').style.display = bank ? 'flex' : 'none';
+  document.getElementById('flöde').style.display = bank ? 'none' : 'flex';
+  document.getElementById('flikSebank').classList.toggle('på', bank);
+  document.getElementById('flikSvärmen').classList.toggle('på', !bank);
+  if (bank) sebank();
+}
+
+async function betala(kvarter) {
+  try {
+    await fetch('/t/tjoho/betala', {
+      method: 'POST', headers: {'content-type': 'application/json'},
+      body: JSON.stringify({ kvarter }),
+    });
+    sebank();
+  } catch {}
+}
+
+async function sebank() {
+  try {
+    const s = await (await fetch('/t/tjoho/sebank')).json();
+    document.getElementById('fordringar').textContent = s.fordringar.toLocaleString('sv-SE');
+    document.getElementById('kassa').textContent = s.kassa.toLocaleString('sv-SE');
+    document.getElementById('insatt').textContent = s.insatt.toLocaleString('sv-SE');
+
+    // Kärnan i hela bygget: luckan är fast, trafiken är det inte.
+    const takt = s.stadensTakt * 60;              // passager per timme just nu
+    const kvot = Math.round(s.fordringarTimmar * 10) / 10;
+    document.getElementById('lucka').innerHTML =
+      `MyBanks lucka tar <b>${s.luckan.per_insättning}</b> per insättning, <b>${s.luckan.per_tio_minuter}</b> per tio minuter — <b>${s.luckan.per_timme}</b> i timmen, och inte en krona mer.` +
+      ` Att få in dagens fordringar genom den tar <b>${kvot} h</b>.` +
+      (s.kassa >= 500 ? ` <b>Koncernens tusen bolag står stilla</b> så länge skattemedel väntar.` : '') +
+      (s.rusning ? ` · ${s.rusning} ×${s.rusningsfaktor}` : ` · ${s.stadensTakt}/min, ingen rusning`);
+
+    const max = Math.max(1, ...s.kvarter.map(k => k.iTimmen));
+    document.getElementById('karta').innerHTML = s.kvarter.map(k => `
+      <div class="z">
+        <span class="namn" title="${esc(k.namn)}">${esc(k.namn)}</span>
+        <span class="zon ${esc(k.zon)}">${esc(k.zon)}</span>
+        <span class="stapel"><i style="width:${Math.round(k.iTimmen / max * 100)}%"></i></span>
+        <span class="tak">${k.vidTaket ? '⊘' : ''}</span>
+        <span class="skuld">${k.skuld.toLocaleString('sv-SE')}</span>
+        ${k.skuld > 0 ? `<button onclick="betala('${esc(k.namn)}')" title="Publiken löser ut ${esc(k.namn)}">lös ut</button>` : ''}
+      </div>`).join('') ||
+      '<div class="tom">Ingen har passerat en betalstation än.</div>';
+  } catch {}
+}
+setInterval(() => { if (flik === 'sebank') sebank(); }, 4000);
 </script></body></html>
