@@ -26,11 +26,10 @@ const godis = (id, satser, extra = {}) => ({ id, typ: 'godis-klart', från: 'chr
 
 // 1. En sats blir en insättning med verifikat.
 p.onEvent(godis(528, 10), ctx);
-kontroll('godis-klart ger en insättning', ut.length === 2 && ut[0].typ === 'insättning');
+kontroll('godis-klart ger en insättning', ut.length === 1 && ut[0].typ === 'insättning');
 kontroll('insättningen pekar på satsen som orsak', ut[0].orsak === 528);
 kontroll('belopp = min(bankens tak 500, 10 × 8 × 10 × 1.5 = 1200) = 500', ut[0].nyttolast.belopp === 500);
-kontroll('första intäkten gör oss också till valutapartner (ett elpris-steg i MyBanks, utan orsak)',
-  ut[1] && ut[1].typ === 'elpris-steg' && ut[1].nyttolast.valuta === 'MyBanks' && ut[1].orsak === undefined);
+kontroll('inget elpris-steg postas (partnerprogrammet är stängt för icke-Elverk)', !ut.some(e => e.typ === 'elpris-steg'));
 const ins = () => ut.filter(e => e.typ === 'insättning');
 kontroll('texten säger ärligt att godiset aldrig lämnat fabriken', /aldrig lämnat fabriken/.test(ut[0].nyttolast.text));
 
@@ -42,7 +41,6 @@ kontroll('dubblett av samma sats ignoreras', ins().length === 1);
 p.onEvent({ id: 600, typ: 'prishöjning', från: 'christian', djup: 1, nyttolast: { pris: 20, från_pris: 10 } }, ctx);
 p.onEvent(godis(601, 5), ctx);
 kontroll('efter prishöjning: 5 × 8 × 20 × 1.5 = 1200 klipps till bankens 500', ins()[1].nyttolast.belopp === 500);
-kontroll('partner-steget postas bara EN gång', ut.filter(e => e.typ === 'elpris-steg').length === 1);
 
 // 4. Ransonering halverar marginalen.
 p.onEvent(godis(602, 5, { ransonerat: true }), ctx);
@@ -60,7 +58,6 @@ const res = await new Promise(r => p.handle({ method: 'GET' }, { writeHead() {},
 kontroll('kvitto till oss bokförs', res.kvitterat === 500);
 kontroll('kvitto till moderbolaget bokförs INTE hos oss', res.kvitterat === 500 && res.verifikat.filter(v => v.kvitto).length === 1);
 kontroll('status visar bokfört = summan av det som faktiskt fick plats (500 + 500)', res.bokfört === 1000);
-kontroll('status visar partner-tidpunkt', typeof res.partner === 'number');
 
 // 7. Godis-klart från någon annan än fabriken ignoreras (ingen ska kunna koka intäkter åt oss).
 p.onEvent({ ...godis(800, 10), från: 'zero-cool' }, ctx);

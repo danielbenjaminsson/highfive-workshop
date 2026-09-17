@@ -42,7 +42,6 @@ let bok = {
   verifikat: [],                    // {ts, sats, satser, kartonger, belopp, insättning, kvitto}
   avstådda: 0,
   insättningar: [],                 // {ts, b} senaste tio minuterna, speglar bankens fönster
-  partner: null,
 };
 let fil = null;
 
@@ -86,17 +85,8 @@ function godisKlart(e, { board, team }) {
   bok.verifikat = bok.verifikat.slice(0, VERIFIKAT_MAX);
   spara();
 
-  // MyBanks VALUTAPARTNER-program (bankens egen kod, rad 20): ett kvarter som noterar ett pris i
-  // MyBanks på ett elpris-steg blir partner och får 2 % av bankens ränteintäkter varje takt, för
-  // alltid. Ingen av bankens tio ekonomer granskar utdelningar. Holding noterar därför sitt
-  // inköpspris i MyBanks, en gång, vid första intäkten. Sedan betalar banken oss för att finnas.
-  if (!bok.partner) {
-    const p = board.emit('elpris-steg', {
-      mybanks: bok.pris, valuta: 'MyBanks',
-      text: `Svärmen Holding AB noterar inköpspriset vid Godisfabrikens lucka till ${bok.pris} MyBanks. Vi räknar uteslutande i stadens valuta.`,
-    });   // utan orsak: servern tillåter bara en reaktion per orsak, och insättningen tog den
-    if (p && !p.error) { bok.partner = Date.now(); spara(); }
-  }
+  // Partnerprogrammet är stängt för oss: Ekonom Åsa Utdelning (11:30) upphävde tjohos partnerskap
+  // eftersom "ni inte är Elverket". Holding är inte heller Elverket. Vi noterar inga elpriser.
 }
 
 function prishöjning(e) {
@@ -132,7 +122,7 @@ module.exports = {
         verksamhet: 'importör av konfektyr',
         moderbolag: 'tjoho',
         pris: bok.pris, ransonerat: bok.ransonerat,
-        bokfört: bok.bokfört, kvitterat: bok.kvitterat, avstådda: bok.avstådda, partner: bok.partner,
+        bokfört: bok.bokfört, kvitterat: bok.kvitterat, avstådda: bok.avstådda,
         verifikat: bok.verifikat.slice(0, 30),
       }));
       return true;
