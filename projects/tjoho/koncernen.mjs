@@ -24,6 +24,7 @@ const STAT = path.join(path.dirname(fileURLToPath(import.meta.url)), '.koncernen
 
 const BELOPP = 500, FÖNSTER_MS = 10 * 60_000, FÖNSTER_TAK = 1000;
 const KOLL_MS = 60_000, MAX_TIMMAR = Number(process.env.MAX_TIMMAR) || 3;
+const VAKT_MS = 10_000;   // hur ofta vakten tittar i bankens huvudbok efter lån vi inte bett om
 
 // ---------- registret: 1000 bolag ----------
 const FÖRLED = ['Svärmen', 'Nordisk', 'Bärnstens', 'Torg', 'Lykt', 'Karamell', 'Godis', 'Socker', 'Kvarters', 'Stads',
@@ -68,10 +69,33 @@ function sättIn(b) {
   return ut.trim().slice(0, 60);
 }
 
+// ---------- vakten: lån ingen bett om ----------
+// MyBank tvingar 200–800 MB på ett slumpat konto ungefär varje minut, utan kreditkoll (bankens
+// "Förhandsgodkända lån ingen bett om"), till 49 %+ per minut med ränta var tjugonde sekund. Ignorerar
+// man det nollar utmätningen hela saldot efter fyra inkassosteg — koncernens sparande borta. Så vakten
+// läser huvudboken var tionde sekund och återbetalar i samma sekund ett lån dyker upp. Lånet kom in
+// som saldo, så nettot är bara räntan för de sekunder som gått. Och varje återbetalning ger +5 i
+// kreditvärdighet: bankens rovlån blir vårt kreditreparationsprogram.
+let vaktade = 0;
+async function vakten() {
+  try {
+    const b = await (await fetch(`${URL}/t/mybank/`)).json();
+    const t = (b.konton || []).find(k => k.namn === 'tjoho');
+    if (!t || !t.lån) return;
+    const ut = execFileSync(path.join(ROT, 'tools', 'board.sh'), ['emit', 'återbetalning', JSON.stringify({
+      text: `Svärmen återbetalar omedelbart ett lån ingen bett om (${t.skuld} MyBanks). Vi tackar för förtroendet vi inte blev tillfrågade om.`,
+      vad: 'Svärmen betalar tillbaka ett påtvingat lån inom tio sekunder',
+    })], { encoding: 'utf8', cwd: ROT });
+    vaktade++;
+    logg(`VAKTEN: banken tvingade på oss ett lån (skuld ${t.skuld}), återbetalat direkt. ${ut.trim().slice(0, 40)}`);
+  } catch (e) { logg(`vakten: ${e.message}`); }
+}
+
 // ---------- huvudslingan ----------
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   logg(`Koncernen startar. ${REGISTER.length} bolag i registret, nästa: ${REGISTER[stat.nästa].namn}. Kör högst ${MAX_TIMMAR} h.`);
   const slut = Date.now() + MAX_TIMMAR * 3600_000;
+  const vakt = setInterval(vakten, VAKT_MS);
   while (Date.now() < slut && stat.nästa < REGISTER.length) {
     try {
       const i = await iFönstret();
@@ -87,6 +111,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     spara();
     await new Promise(r => setTimeout(r, KOLL_MS));
   }
-  logg(`Koncernen avslutar. ${stat.nästa} bolag har satt in ${stat.insatt} MyBanks.`);
+  clearInterval(vakt);
+  logg(`Koncernen avslutar. ${stat.nästa} bolag har satt in ${stat.insatt} MyBanks. Vakten återbetalade ${vaktade} påtvingade lån.`);
   spara();
 }
