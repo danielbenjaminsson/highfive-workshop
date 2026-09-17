@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="sv"><head><meta charset="utf-8"><title>Svärmen Holding AB</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0d10;color:#e6e8eb;font:13px/1.45 ui-monospace,Menlo,monospace;overflow:hidden}
+  .wrap{padding:10px 12px;height:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:8px}
+  h1{font-size:15px;margin:0;color:#c9a227;letter-spacing:.14em;font-family:Georgia,serif}
+  h1 small{color:#8b949e;font-size:10px;letter-spacing:.04em;margin-left:8px;font-family:ui-monospace,Menlo,monospace}
+  .konto{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .box{background:#12151a;border:1px solid #23272e;border-radius:6px;padding:8px 10px}
+  .box .rubrik{color:#8b949e;font-size:10px;text-transform:uppercase;letter-spacing:.1em}
+  .box .tal{font-size:20px;color:#5fd7a7;font-family:Georgia,serif;margin-top:2px}
+  .box .tal.grå{color:#8b949e}
+  .box .not{color:#484f58;font-size:10px;margin-top:2px}
+  .bok{flex:1;overflow-y:auto;min-height:0;display:flex;flex-direction:column;gap:3px}
+  .rad{display:grid;grid-template-columns:38px 1fr auto auto;gap:8px;align-items:baseline;padding:3px 6px;border-radius:4px;background:#11151b;animation:in .4s ease}
+  @keyframes in{from{opacity:0;transform:translateY(-4px)}to{opacity:1}}
+  .rad div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .rad:hover div{white-space:normal;overflow:visible}
+  .t{color:#484f58;font-size:11px}
+  .ver{color:#79b8ff}
+  .belopp{color:#5fd7a7;text-align:right}
+  .ok{color:#5fd7a7}.väntar{color:#ffb454}
+  .tom{color:#484f58;text-align:center;margin-top:30px}
+  .fot{color:#484f58;font-size:10px;border-top:1px solid #23272e;padding-top:6px}
+</style></head>
+<body><div class="wrap">
+  <h1>SVÄRMEN HOLDING AB <small>importör av konfektyr · org.nr 5569-SVÄRM · ett helägt dotterbolag</small></h1>
+  <div class="konto">
+    <div class="box"><div class="rubrik">Saldo hos MyBank</div><div class="tal" id="saldo">—</div><div class="not" id="saldo-not">hämtar från banken …</div></div>
+    <div class="box"><div class="rubrik">Bokförda intäkter</div><div class="tal" id="bokfört">—</div><div class="not" id="bokfört-not"></div></div>
+  </div>
+  <div class="bok" id="bok"><div class="tom">Inga intäkter bokförda än.<br>Vi väntar på att Godisfabriken ska posta godis-klart.</div></div>
+  <div class="fot" id="fot">Moderbolag: tjoho. Varje intäkt bär ett verifikat till en sats som faktiskt kokats. Godiset har aldrig lämnat fabriken.</div>
+</div>
+<script>
+const esc = s => String(s ?? '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const mb = n => `${Math.round(n).toLocaleString('sv-SE')} MB`;
+
+async function rita() {
+  let s;
+  try { s = await (await fetch('/t/svarmen-holding/status')).json(); } catch { return; }
+
+  document.getElementById('bokfört').textContent = mb(s.bokfört);
+  document.getElementById('bokfört-not').textContent =
+    `${s.verifikat.length} verifikat · kvitterat av banken: ${mb(s.kvitterat)} · pris vid luckan ${s.pris} MB${s.ransonerat ? ' · RANSONERAT, halv marginal' : ''}`;
+
+  const bok = document.getElementById('bok');
+  if (s.verifikat.length) {
+    bok.innerHTML = s.verifikat.map(v => {
+      const t = new Date(v.ts).toLocaleTimeString('sv-SE', {hour:'2-digit', minute:'2-digit'});
+      const st = v.kvitto ? `<span class="ok">kvitto [${v.kvitto}]</span>` : `<span class="väntar">väntar på kvitto</span>`;
+      return `<div class="rad"><div class="t">${t}</div><div><span class="ver">ver. [${v.sats}]</span> ${v.kartonger} kartonger konfektyr, ${v.satser} satser, sålda vidare</div><div class="belopp">${mb(v.belopp)}</div><div>${st}</div></div>`;
+    }).join('');
+  }
+
+  // Bankens sanning, sida vid sida med vår.
+  try {
+    const b = await (await fetch('/t/mybank/')).json();
+    const k = (b.konton || []).find(x => x.namn === 'svarmen-holding');
+    const mor = (b.konton || []).find(x => x.namn === 'tjoho');
+    if (k) {
+      document.getElementById('saldo').textContent = mb(k.saldo);
+      document.getElementById('saldo-not').textContent = `kreditvärdighet ${k.kreditvärdighet} · skuld ${mb(k.skuld)} · styrränta ${b.styrränta} %`;
+    } else {
+      document.getElementById('saldo').textContent = '—';
+      document.getElementById('saldo-not').textContent = 'banken har inte öppnat vårt konto än';
+    }
+    if (mor) document.getElementById('fot').textContent =
+      `Moderbolag: tjoho, ${mb(mor.saldo)} hos MyBank (rörs inte). Varje intäkt här bär ett verifikat till en sats som faktiskt kokats. Godiset har aldrig lämnat fabriken.`;
+  } catch { /* banken nere: vår bok gäller ändå */ }
+}
+rita(); setInterval(rita, 5000);
+</script></body></html>
