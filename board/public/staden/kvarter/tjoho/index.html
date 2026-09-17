@@ -43,6 +43,8 @@ function rad(h) {
   if (h.händelse === 'delsvar')  text = `delsvar postat av <span class="kap">${esc(h.kapabilitet)}</span> <span class="grå">→ puls [${esc(h.id)}]</span>`;
   if (h.händelse === 'lärdom')   text = `lärdom från kyrkogården <span class="grå">— "${esc(h.varför)}"</span>`;
   if (h.händelse === 'betyg')    text = `betyg ${esc(h.fitness)} på delsvar [${esc(h.om)}] <span class="grå">från ${esc(h.från)}</span>`;
+  if (h.händelse === 'avstod')   text = `avstod ${h.typ ? esc(h.typ) : ''}${h.om ? ' på [' + esc(h.om) + ']' : ''} <span class="grå">— ${esc(h.skäl)}</span>`;
+  if (h.händelse === 'lärdom-postad') text = `lärdom kvitterad på pulsen <span class="grå">← kyrkogård [${esc(h.om)}]</span>`;
   if (h.händelse === 'vittnesmål') text = `vittnet såg jakten <span class="grå">— överlämning [${esc(h.om)}] från ${esc(h.från)}</span>`;
   if (h.händelse === 'undvek')   text = `<span class="kap">${esc(h.kapabilitet)}</span> hoppas över <span class="grå">— ${esc(h.skäl)}</span>`;
   if (h.händelse === 'spärrad')  text = `ekospärr <span class="grå">— ${esc(h.fel)}</span>`;
