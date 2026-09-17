@@ -238,8 +238,10 @@ function hanteraÖverlämning(e, { board }) {
   logg('spawn', { kapabilitet: 'vittnet', fråga: `överlämning: ${n.vad || 'okänt byte'}`, varv: 1 });
   const vad = n.vad || 'något', wanted = n.wanted !== undefined ? `wanted ${n.wanted}` : 'okänd wanted-nivå';
   const vart = n.riktning ? `mot ${n.riktning}` : n.förare ? `med ${n.förare} vid ratten` : 'åt okänt håll';
+  const såg = `Svärmen såg ${vad} (${wanted}) passera ${vart}. Signalement loggat, Domkapitlet kan begära ut det.`;
   const r = skicka(board, 'vittnesmål', {
-    såg: `Svärmen såg ${vad} (${wanted}) passera ${vart}. Signalement loggat, Domkapitlet kan begära ut det.`,
+    såg,
+    text: såg,   // Frågeportens reporter ([288]) citerar fälten rubrik/text/varför/plats/vad — utan text blir rubriken bara platsen
     plats: n.plats || 'gathörnet vid Svärmen',
   }, e.id, 'låg');
   if (r) logg('vittnesmål', { om: e.id, från: e.från });
